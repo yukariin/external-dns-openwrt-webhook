@@ -111,13 +111,11 @@ func endpoints2DNSRecords(endpoints []*endpoint.Endpoint) []openwrt.DNSRecord {
 				})
 			}
 		case endpoint.RecordTypeCNAME:
-			if len(ep.Targets) > 0 {
-				dnsRecords = append(dnsRecords, openwrt.DNSRecord{
-					Type:   "CNAME",
-					CName:  ep.DNSName,
-					Target: ep.Targets[0],
-				})
-			}
+			dnsRecords = append(dnsRecords, openwrt.DNSRecord{
+				Type:   "CNAME",
+				CName:  ep.DNSName,
+				Target: ep.Targets[0],
+			})
 		default:
 			continue
 		}
