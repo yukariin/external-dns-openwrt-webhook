@@ -5,8 +5,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/logger"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/openwrt"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/logger"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/openwrt"
 	"sigs.k8s.io/external-dns/endpoint"
 )
 
@@ -71,47 +71,36 @@ var _ = Describe("Provider Suite", func() {
 			}
 		})
 
-		It("dns records to endpoint", func() {
-			records := []struct {
-				Name   string `json:"name"`
-				Type   string `json:"type"`
-				Target string `json:"target"`
-			}{
-				{
-					Name:   "a.foobar.com",
-					Type:   "A",
-					Target: "1.1.1.1",
+		It("dns records to endpoint with uci section key", func() {
+			dnsRecords := map[string]openwrt.DNSRecord{
+				"cfg01a2b3": {
+					Name: "a.foobar.com",
+					Type: "A",
+					IP:   "1.1.1.1",
 				},
-				{
-					Name:   "b.foobar.com",
+				"cfg04d5e6": {
 					Type:   "CNAME",
 					Target: "c.foobar.com",
+					CName:  "b.foobar.com",
 				},
-			}
-
-			dnsRecords := make(map[string]openwrt.DNSRecord)
-			for _, record := range records {
-				switch record.Type {
-				case "A":
-					dnsRecords[record.Name] = openwrt.DNSRecord{
-						Name: record.Name,
-						Type: record.Type,
-						IP:   record.Target,
-					}
-				case "CNAME":
-					dnsRecords[record.Name] = openwrt.DNSRecord{
-						Type:   record.Type,
-						Target: record.Target,
-						CName:  record.Name,
-					}
-				}
 			}
 
 			endpoints := dnsRecords2Endpoints(dnsRecords)
-			for index, record := range records {
-				Expect(endpoints[index].DNSName).To(Equal(record.Name))
-				Expect(endpoints[index].Targets[0]).To(Equal(record.Target))
-				Expect(endpoints[index].RecordType).To(Equal(record.Type))
+			Expect(len(endpoints)).To(Equal(2))
+
+			for _, ep := range endpoints {
+				Expect(ep.ProviderSpecific).To(HaveLen(1))
+				Expect(ep.ProviderSpecific[0].Name).To(Equal(openwrt.UCISectionKey))
+				Expect(ep.ProviderSpecific[0].Value).To(Or(Equal("cfg01a2b3"), Equal("cfg04d5e6")))
+
+				switch ep.RecordType {
+				case endpoint.RecordTypeA:
+					Expect(ep.DNSName).To(Equal("a.foobar.com"))
+					Expect(ep.Targets[0]).To(Equal("1.1.1.1"))
+				case endpoint.RecordTypeCNAME:
+					Expect(ep.DNSName).To(Equal("b.foobar.com"))
+					Expect(ep.Targets[0]).To(Equal("c.foobar.com"))
+				}
 			}
 		})
 	})

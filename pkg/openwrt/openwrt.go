@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/logger"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/lucirpc"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/logger"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/lucirpc"
 	"go.uber.org/zap"
 )
 
@@ -15,7 +15,6 @@ import (
 type OpenWRT interface {
 	GetDNSRecords(context.Context) (map[string]DNSRecord, error)
 	SetDNSRecords(context.Context, []DNSRecord) error
-	UpdateDNSRecords(context.Context, []DNSRecord) error
 	DeleteDNSRecords(context.Context, []DNSRecord) error
 }
 
@@ -95,80 +94,40 @@ func (o *openWRT) SetDNSRecords(ctx context.Context, records []DNSRecord) error 
 	return nil
 }
 
-func (o *openWRT) UpdateDNSRecords(ctx context.Context, updateRecords []DNSRecord) error {
-	currentRecords, err := o.GetDNSRecords(ctx)
-	if err != nil {
-		return err
-	}
-
-	for cfg, currentRecord := range currentRecords {
-		for index, updateRecord := range updateRecords {
-			if updateRecord.Type == "A" && updateRecord.Name == currentRecord.Name {
-				_, err := o.lucirpc.Uci(ctx, "delete", []string{"dhcp", cfg})
-				if err != nil {
-					return err
-				}
-
-				if err := o.addA(ctx, updateRecord); err != nil {
-					return err
-				}
-
-				logger.Log.Debug("updated record", zap.Any("record", updateRecord))
-				updateRecords = append(updateRecords[:index], updateRecords[index+1:]...)
-			}
-
-			if updateRecord.Type == "CNAME" && updateRecord.CName == currentRecord.CName {
-				_, err := o.lucirpc.Uci(ctx, "delete", []string{"dhcp", cfg})
-				if err != nil {
-					return err
-				}
-
-				if err := o.addCName(ctx, updateRecord); err != nil {
-					return err
-				}
-
-				logger.Log.Debug("updated record", zap.Any("record", updateRecord))
-				updateRecords = append(updateRecords[:index], updateRecords[index+1:]...)
-			}
-		}
-	}
-
-	if len(updateRecords) > 0 {
-		return fmt.Errorf("records not found: %v", updateRecords)
-	}
-
-	if _, err := o.lucirpc.Uci(ctx, "commit", []string{"dhcp"}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (o *openWRT) DeleteDNSRecords(ctx context.Context, deleteRecords []DNSRecord) error {
 	currentRecords, err := o.GetDNSRecords(ctx)
 	if err != nil {
 		return err
 	}
 
+	matched := make(map[int]bool)
+
 	for cfg, currentRecord := range currentRecords {
-		for index, deleteRecord := range deleteRecords {
-			if (deleteRecord.Type == "A" && deleteRecord.Name == currentRecord.Name) ||
-				(deleteRecord.Type == "CNAME" && deleteRecord.CName == currentRecord.CName) {
-				_, err := o.lucirpc.Uci(ctx, "delete", []string{"dhcp", cfg})
-				if err != nil {
+		for i, deleteRecord := range deleteRecords {
+			if matched[i] {
+				continue
+			}
+			if recordMatches(currentRecord, deleteRecord) {
+				if _, err := o.lucirpc.Uci(ctx, "delete", []string{"dhcp", cfg}); err != nil {
 					return err
 				}
-				logger.Log.Debug("deleted record", zap.Any("record", currentRecord))
-				deleteRecords = append(deleteRecords[:index], deleteRecords[index+1:]...)
+				logger.Log.Debug("deleted record", zap.String("section", cfg), zap.Any("record", currentRecord))
+				matched[i] = true
+				break
 			}
 		}
 	}
 
-	if len(deleteRecords) > 0 {
-		return fmt.Errorf("records not found: %v", deleteRecords)
+	var unmatched []DNSRecord
+	for i, rec := range deleteRecords {
+		if !matched[i] {
+			unmatched = append(unmatched, rec)
+		}
+	}
+	if len(unmatched) > 0 {
+		return fmt.Errorf("records not found for deletion: %v", unmatched)
 	}
 
-	// should we remove even when records not found?
 	if _, err := o.lucirpc.Uci(ctx, "commit", []string{"dhcp"}); err != nil {
 		return err
 	}
@@ -232,4 +191,16 @@ func (o *openWRT) addCName(ctx context.Context, record DNSRecord) error {
 	}
 
 	return nil
+}
+
+// recordMatches checks whether a current UCI record matches a desired record
+// by comparing type, name, and value (IP for A records, target for CNAME).
+func recordMatches(current DNSRecord, desired DNSRecord) bool {
+	switch desired.Type {
+	case "A":
+		return current.Type == "A" && current.Name == desired.Name && current.IP == desired.IP
+	case "CNAME":
+		return current.Type == "CNAME" && current.CName == desired.CName && current.Target == desired.Target
+	}
+	return false
 }

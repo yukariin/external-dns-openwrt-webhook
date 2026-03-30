@@ -1,4 +1,4 @@
-module github.com/renanqts/external-dns-openwrt-webhook
+module github.com/yukariin/external-dns-openwrt-webhook
 
 go 1.23.4
 

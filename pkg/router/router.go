@@ -8,7 +8,7 @@ import (
 	"github.com/Depado/ginprom"
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/logger"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/logger"
 	"go.uber.org/zap"
 )
 

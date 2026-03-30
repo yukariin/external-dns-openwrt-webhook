@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/renanqts/external-dns-openwrt-webhook/internal/provider"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/logger"
-	"github.com/renanqts/external-dns-openwrt-webhook/pkg/router"
+	"github.com/yukariin/external-dns-openwrt-webhook/internal/provider"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/logger"
+	"github.com/yukariin/external-dns-openwrt-webhook/pkg/router"
 )
 
 type Config struct {
