@@ -3,6 +3,8 @@ name: Build and Publish Image
 on:
   release:
     types: [published]
+  push:
+    branches: [refactor]
 
 jobs:
   build:
