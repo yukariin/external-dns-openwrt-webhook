@@ -101,21 +101,26 @@ func endpoints2DNSRecords(endpoints []*endpoint.Endpoint) []openwrt.DNSRecord {
 	var dnsRecords []openwrt.DNSRecord
 
 	for _, ep := range endpoints {
-		var dnsRecord openwrt.DNSRecord
-
 		switch ep.RecordType {
 		case endpoint.RecordTypeA:
-			dnsRecord.Type = "A"
-			dnsRecord.Name = ep.DNSName
-			dnsRecord.IP = ep.Targets[0]
+			for _, target := range ep.Targets {
+				dnsRecords = append(dnsRecords, openwrt.DNSRecord{
+					Type: "A",
+					Name: ep.DNSName,
+					IP:   target,
+				})
+			}
 		case endpoint.RecordTypeCNAME:
-			dnsRecord.Type = "CNAME"
-			dnsRecord.CName = ep.DNSName
-			dnsRecord.Target = ep.Targets[0]
+			if len(ep.Targets) > 0 {
+				dnsRecords = append(dnsRecords, openwrt.DNSRecord{
+					Type:   "CNAME",
+					CName:  ep.DNSName,
+					Target: ep.Targets[0],
+				})
+			}
 		default:
 			continue
 		}
-		dnsRecords = append(dnsRecords, dnsRecord)
 	}
 
 	return dnsRecords
