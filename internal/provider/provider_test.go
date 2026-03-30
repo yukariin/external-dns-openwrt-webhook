@@ -71,6 +71,31 @@ var _ = Describe("Provider Suite", func() {
 			}
 		})
 
+		It("should expand multi-target A records", func() {
+			ep := &endpoint.Endpoint{
+				DNSName:    "multi.foobar.com",
+				RecordType: endpoint.RecordTypeA,
+				Targets:    endpoint.Targets{"1.1.1.1", "2.2.2.2"},
+			}
+
+			dnsRecords := endpoints2DNSRecords([]*endpoint.Endpoint{ep})
+			Expect(dnsRecords).To(HaveLen(2))
+			Expect(dnsRecords[0]).To(Equal(openwrt.DNSRecord{Type: "A", Name: "multi.foobar.com", IP: "1.1.1.1"}))
+			Expect(dnsRecords[1]).To(Equal(openwrt.DNSRecord{Type: "A", Name: "multi.foobar.com", IP: "2.2.2.2"}))
+		})
+
+		It("should only use first target for CNAME", func() {
+			ep := &endpoint.Endpoint{
+				DNSName:    "alias.foobar.com",
+				RecordType: endpoint.RecordTypeCNAME,
+				Targets:    endpoint.Targets{"a.foobar.com", "b.foobar.com"},
+			}
+
+			dnsRecords := endpoints2DNSRecords([]*endpoint.Endpoint{ep})
+			Expect(dnsRecords).To(HaveLen(1))
+			Expect(dnsRecords[0]).To(Equal(openwrt.DNSRecord{Type: "CNAME", CName: "alias.foobar.com", Target: "a.foobar.com"}))
+		})
+
 		It("dns records to endpoint with uci section key", func() {
 			dnsRecords := map[string]openwrt.DNSRecord{
 				"cfg01a2b3": {
