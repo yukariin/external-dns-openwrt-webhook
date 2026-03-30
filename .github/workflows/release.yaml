@@ -1,0 +1,30 @@
+name: Build and Publish Image
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: ko-build/setup-ko@v0.8
+
+      - name: Build and publish
+        run: |
+          ko build --bare \
+            --tags $(echo "${{ github.event.release.tag_name }}" | sed 's/^v//'),latest \
+            github.com/yukariin/external-dns-openwrt-webhook/cmd/webhook
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/external-dns-openwrt-webhook
