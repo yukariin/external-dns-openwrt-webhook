@@ -23,11 +23,8 @@ jobs:
 
       - name: Build and publish
         run: |
-          TAGS="latest"
-          if [ -n "${{ github.event.release.tag_name }}" ]; then
-            TAGS="$(echo '${{ github.event.release.tag_name }}' | sed 's/^v//'),latest"
-          fi
-          ko build --bare --tags "$TAGS" \
+          ko build --bare \
+            --tags $(echo "${{ github.event.release.tag_name }}" | sed 's/^v//'),latest \
             github.com/yukariin/external-dns-openwrt-webhook/cmd/webhook
         env:
           KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/external-dns-openwrt-webhook
