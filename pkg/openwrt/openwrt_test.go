@@ -3,6 +3,7 @@ package openwrt
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -49,6 +50,25 @@ var _ = Describe("OpenWRT", func() {
 	})
 
 	Context("Get DNS", func() {
+		It("returns error when Uci fails", func() {
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return("", fmt.Errorf("connection refused"))
+
+			o := openWRT{lucirpc: mockLuciRPC}
+			records, err := o.GetDNSRecords(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("connection refused"))
+			Expect(records).To(BeNil())
+		})
+
+		It("returns empty map when result is empty", func() {
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return("", nil)
+
+			o := openWRT{lucirpc: mockLuciRPC}
+			records, err := o.GetDNSRecords(ctx)
+			Expect(err).To(BeNil())
+			Expect(records).To(BeEmpty())
+		})
+
 		It("get all records", func() {
 			expectedJson, err := json.Marshal(map[string]DNSRecord{
 				"x": {
@@ -239,9 +259,64 @@ var _ = Describe("OpenWRT", func() {
 			Expect(err).ToNot(BeNil())
 			Expect(err.Error()).To(Equal("value is required"))
 		})
+
+		It("rejects invalid record type", func() {
+			o := openWRT{}
+			err := o.SetDNSRecords(ctx, []DNSRecord{
+				{Type: "MX", Name: "foo.bar.com"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("invalid record type: MX"))
+		})
+
+		It("sets multiple records with single commit", func() {
+			mockLuciRPC.EXPECT().Uci(ctx, "add", []string{"dhcp", "domain"}).Return("cfg01", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", "cfg01", "name", "a.example.com"}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", "cfg01", "ip", "1.1.1.1"}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "add", []string{"dhcp", "cname"}).Return("cfg02", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", "cfg02", "cname", "b.example.com"}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", "cfg02", "target", "a.example.com"}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "commit", []string{"dhcp"}).Return("", nil)
+
+			o := openWRT{lucirpc: mockLuciRPC}
+			err := o.SetDNSRecords(ctx, []DNSRecord{
+				{Type: "A", Name: "a.example.com", IP: "1.1.1.1"},
+				{Type: "CNAME", CName: "b.example.com", Target: "a.example.com"},
+			})
+			Expect(err).To(BeNil())
+		})
 	})
 
 	Context("Delete DNS", func() {
+		It("returns error when GetDNSRecords fails", func() {
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return("", fmt.Errorf("timeout"))
+
+			o := openWRT{lucirpc: mockLuciRPC}
+			err := o.DeleteDNSRecords(ctx, []DNSRecord{
+				{Type: "A", Name: "foo.com", IP: "1.1.1.1"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("timeout"))
+		})
+
+		It("returns error when delete RPC call fails", func() {
+			currentRecords := map[string]DNSRecord{
+				"x": {Type: "domain", Name: "foo.com", IP: "1.1.1.1"},
+			}
+			currentJson, err := json.Marshal(currentRecords)
+			Expect(err).To(BeNil())
+
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return(string(currentJson), nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "delete", []string{"dhcp", "x"}).Return("", fmt.Errorf("permission denied"))
+
+			o := openWRT{lucirpc: mockLuciRPC}
+			err = o.DeleteDNSRecords(ctx, []DNSRecord{
+				{Type: "A", Name: "foo.com", IP: "1.1.1.1"},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("permission denied"))
+		})
+
 		It("delete A record", func() {
 			cfg := "x"
 			name := "happy.com"

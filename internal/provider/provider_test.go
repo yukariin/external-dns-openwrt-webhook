@@ -1,13 +1,18 @@
 package provider
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	mocks "github.com/yukariin/external-dns-openwrt-webhook/internal/mocks/openwrt"
 	"github.com/yukariin/external-dns-openwrt-webhook/pkg/logger"
 	"github.com/yukariin/external-dns-openwrt-webhook/pkg/openwrt"
+	"go.uber.org/mock/gomock"
 	"sigs.k8s.io/external-dns/endpoint"
+	"sigs.k8s.io/external-dns/plan"
 )
 
 func TestProvider(t *testing.T) {
@@ -193,6 +198,191 @@ var _ = Describe("Provider Suite", func() {
 			dnsRecords := endpoints2DNSRecords([]*endpoint.Endpoint{ep})
 			Expect(dnsRecords).To(HaveLen(1))
 			Expect(dnsRecords[0].Value).To(Equal("value1"))
+		})
+
+		It("should skip endpoints with no targets", func() {
+			endpoints := []*endpoint.Endpoint{
+				{DNSName: "a.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				{DNSName: "empty.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{}},
+				{DNSName: "nil.example.com", RecordType: endpoint.RecordTypeCNAME},
+			}
+
+			dnsRecords := endpoints2DNSRecords(endpoints)
+			Expect(dnsRecords).To(HaveLen(1))
+			Expect(dnsRecords[0].Name).To(Equal("a.example.com"))
+		})
+
+		It("should skip unsupported record types", func() {
+			endpoints := []*endpoint.Endpoint{
+				{DNSName: "a.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				{DNSName: "mx.example.com", RecordType: "MX", Targets: endpoint.Targets{"mail.example.com"}},
+			}
+
+			dnsRecords := endpoints2DNSRecords(endpoints)
+			Expect(dnsRecords).To(HaveLen(1))
+			Expect(dnsRecords[0].Name).To(Equal("a.example.com"))
+		})
+
+		It("should return empty slice for empty input", func() {
+			endpoints := dnsRecords2Endpoints(map[string]openwrt.DNSRecord{})
+			Expect(endpoints).ToNot(BeNil())
+			Expect(endpoints).To(BeEmpty())
+		})
+
+		It("should return empty slice for nil input", func() {
+			endpoints := dnsRecords2Endpoints(nil)
+			Expect(endpoints).ToNot(BeNil())
+			Expect(endpoints).To(BeEmpty())
+		})
+	})
+
+	Context("ApplyChanges", func() {
+		var (
+			ctx         context.Context
+			mockCtrl    *gomock.Controller
+			mockOpenWRT *mocks.MockOpenWRT
+			p           *Provider
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			mockCtrl = gomock.NewController(GinkgoT())
+			mockOpenWRT = mocks.NewMockOpenWRT(mockCtrl)
+			p = &Provider{openwrt: mockOpenWRT}
+		})
+
+		AfterEach(func() {
+			mockCtrl.Finish()
+		})
+
+		It("should create and delete records", func() {
+			changes := &plan.Changes{
+				Create: []*endpoint.Endpoint{
+					{DNSName: "new.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				},
+				Delete: []*endpoint.Endpoint{
+					{DNSName: "old.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"2.2.2.2"}},
+				},
+			}
+
+			mockOpenWRT.EXPECT().DeleteDNSRecords(ctx, []openwrt.DNSRecord{
+				{Type: "A", Name: "old.example.com", IP: "2.2.2.2"},
+			}).Return(nil)
+			mockOpenWRT.EXPECT().SetDNSRecords(ctx, []openwrt.DNSRecord{
+				{Type: "A", Name: "new.example.com", IP: "1.1.1.1"},
+			}).Return(nil)
+
+			err := p.ApplyChanges(ctx, changes)
+			Expect(err).To(BeNil())
+		})
+
+		It("should handle update (delete old + create new)", func() {
+			changes := &plan.Changes{
+				UpdateOld: []*endpoint.Endpoint{
+					{DNSName: "app.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				},
+				UpdateNew: []*endpoint.Endpoint{
+					{DNSName: "app.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"2.2.2.2"}},
+				},
+			}
+
+			mockOpenWRT.EXPECT().DeleteDNSRecords(ctx, []openwrt.DNSRecord{
+				{Type: "A", Name: "app.example.com", IP: "1.1.1.1"},
+			}).Return(nil)
+			mockOpenWRT.EXPECT().SetDNSRecords(ctx, []openwrt.DNSRecord{
+				{Type: "A", Name: "app.example.com", IP: "2.2.2.2"},
+			}).Return(nil)
+
+			err := p.ApplyChanges(ctx, changes)
+			Expect(err).To(BeNil())
+		})
+
+		It("should not call delete or create when changes are empty", func() {
+			changes := &plan.Changes{}
+			// No mock expectations — neither Delete nor Set should be called
+			err := p.ApplyChanges(ctx, changes)
+			Expect(err).To(BeNil())
+		})
+
+		It("should abort create phase when delete phase fails", func() {
+			changes := &plan.Changes{
+				Delete: []*endpoint.Endpoint{
+					{DNSName: "old.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				},
+				Create: []*endpoint.Endpoint{
+					{DNSName: "new.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"2.2.2.2"}},
+				},
+			}
+
+			mockOpenWRT.EXPECT().DeleteDNSRecords(ctx, gomock.Any()).Return(fmt.Errorf("delete failed"))
+			// SetDNSRecords should NOT be called
+
+			err := p.ApplyChanges(ctx, changes)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("delete phase failed"))
+		})
+
+		It("should return error when create phase fails", func() {
+			changes := &plan.Changes{
+				Create: []*endpoint.Endpoint{
+					{DNSName: "new.example.com", RecordType: endpoint.RecordTypeA, Targets: endpoint.Targets{"1.1.1.1"}},
+				},
+			}
+
+			mockOpenWRT.EXPECT().SetDNSRecords(ctx, gomock.Any()).Return(fmt.Errorf("set failed"))
+
+			err := p.ApplyChanges(ctx, changes)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("create phase failed"))
+		})
+	})
+
+	Context("Records", func() {
+		var (
+			ctx         context.Context
+			mockCtrl    *gomock.Controller
+			mockOpenWRT *mocks.MockOpenWRT
+			p           *Provider
+		)
+
+		BeforeEach(func() {
+			ctx = context.Background()
+			mockCtrl = gomock.NewController(GinkgoT())
+			mockOpenWRT = mocks.NewMockOpenWRT(mockCtrl)
+			p = &Provider{openwrt: mockOpenWRT}
+		})
+
+		AfterEach(func() {
+			mockCtrl.Finish()
+		})
+
+		It("should return converted endpoints", func() {
+			mockOpenWRT.EXPECT().GetDNSRecords(ctx).Return(map[string]openwrt.DNSRecord{
+				"cfg01": {Type: "A", Name: "a.example.com", IP: "1.1.1.1"},
+				"cfg02": {Type: "CNAME", CName: "b.example.com", Target: "a.example.com"},
+			}, nil)
+
+			endpoints, err := p.Records(ctx)
+			Expect(err).To(BeNil())
+			Expect(endpoints).To(HaveLen(2))
+		})
+
+		It("should return error when GetDNSRecords fails", func() {
+			mockOpenWRT.EXPECT().GetDNSRecords(ctx).Return(nil, fmt.Errorf("connection refused"))
+
+			endpoints, err := p.Records(ctx)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("connection refused"))
+			Expect(endpoints).To(BeNil())
+		})
+
+		It("should return empty slice when no records exist", func() {
+			mockOpenWRT.EXPECT().GetDNSRecords(ctx).Return(map[string]openwrt.DNSRecord{}, nil)
+
+			endpoints, err := p.Records(ctx)
+			Expect(err).To(BeNil())
+			Expect(endpoints).ToNot(BeNil())
+			Expect(endpoints).To(BeEmpty())
 		})
 	})
 })
