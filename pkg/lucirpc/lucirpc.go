@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -30,9 +31,8 @@ const (
 var (
 	ErrRpcLoginFail = errors.New("rpc: login fail")
 
-	ErrHttpUnauthenticated = errors.New("http: Unauthenticated")
-	ErrHttpUnauthorized    = errors.New("http: Unauthorized")
-	ErrHttpForbidden       = errors.New("http: Forbidden")
+	ErrHttpUnauthorized = errors.New("http: Unauthorized")
+	ErrHttpForbidden    = errors.New("http: Forbidden")
 )
 
 type LuciRPC interface {
@@ -63,10 +63,10 @@ func New(config *Config) (LuciRPC, error) {
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: config.InsecureSkipVerify,
 			},
-			Dial: (&net.Dialer{
+			DialContext: (&net.Dialer{
 				Timeout:   time.Duration(config.Timeout) * time.Second,
 				KeepAlive: time.Duration(config.Timeout) * time.Second,
-			}).Dial,
+			}).DialContext,
 		},
 	}
 
@@ -89,7 +89,7 @@ func (c *lucirpc) auth(ctx context.Context) error {
 
 	// OpenWRT JSON RPC response of wrong username and password
 	// {"id":1,"result":null,"error":null}
-	if token == "null" {
+	if token == "" || token == "null" {
 		return ErrRpcLoginFail
 	}
 
@@ -133,7 +133,7 @@ func (c *lucirpc) rpc(ctx context.Context, path, method string, params []string)
 }
 
 func (c *lucirpc) getUri(path, method string) string {
-	logger.Log.Debug("uri", zap.String("path", path), zap.String("method", method), zap.String("token", c.token))
+	logger.Log.Debug("uri", zap.String("path", path), zap.String("method", method))
 	proto := "https://"
 	if !c.config.SSL {
 		proto = "http://"
@@ -147,10 +147,12 @@ func (c *lucirpc) getUri(path, method string) string {
 	return url
 }
 
-func (c *lucirpc) call(ctx context.Context, url string, postBody []byte) ([]byte, error) {
-	logger.Log.Debug("call", zap.String("url", url), zap.String("postBody", string(postBody)))
+func (c *lucirpc) call(ctx context.Context, rawURL string, postBody []byte) ([]byte, error) {
+	if u, err := url.Parse(rawURL); err == nil {
+		logger.Log.Debug("call", zap.String("path", u.Path))
+	}
 	body := bytes.NewReader(postBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, body)
 	if err != nil {
 		return nil, err
 	}
@@ -162,13 +164,16 @@ func (c *lucirpc) call(ctx context.Context, url string, postBody []byte) ([]byte
 	}
 	defer resp.Body.Close()
 
-	var respBody []byte
-	respBody, err = io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %w", err)
+	}
+
 	if resp.StatusCode > 226 {
 		return respBody, c.httpError(resp.StatusCode)
 	}
 
-	return respBody, err
+	return respBody, nil
 }
 
 func (c *lucirpc) httpError(code int) error {
@@ -206,18 +211,16 @@ func parseString(obj interface{}) (string, error) {
 		return "", errors.New("nil object cannot be parsed")
 	}
 
-	var result string
-	if _, ok := obj.(string); ok {
-		result = fmt.Sprintf("%v", obj)
-		return result, nil
+	if s, ok := obj.(string); ok {
+		return s, nil
 	}
 
 	jsonBytes, err := json.Marshal(obj)
-	if err == nil {
-		result = string(jsonBytes)
+	if err != nil {
+		return "", err
 	}
 
-	return result, err
+	return string(jsonBytes), nil
 }
 
 func parseError(obj interface{}) error {

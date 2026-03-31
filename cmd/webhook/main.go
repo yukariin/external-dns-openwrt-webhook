@@ -50,13 +50,12 @@ func main() {
 	<-sigChan
 	logger.Log.Info("termination signal received, shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutodwnTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.ShutdownTimeout)*time.Second)
+	defer cancel()
+
 	if err := router.Shutdown(ctx); err != nil {
 		logger.Log.Error("failed to shutdown server", zap.Error(err))
 	}
-
-	cancel()
-	<-ctx.Done()
 
 	logger.Log.Info("service shutdown completed")
 }

@@ -140,22 +140,22 @@ func (w *Webhook) AdjustEndpoints(c *gin.Context) {
 	}
 
 	logger.Log.Debug("webhook adjust endpoints", zap.Int("endpoints", len(pve)))
-	c.Header(contentTypeHeader, contentTypePlaintext)
 	pve, err := w.provider.AdjustEndpoints(pve)
 	if err != nil {
-		c.Header(varyHeader, contentTypeHeader)
 		logger.Log.Error("error adjusting endpoints", zap.Error(err))
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	out, err := json.Marshal(&pve)
+	if err != nil {
+		logger.Log.Error("error encoding adjusted endpoints", zap.Error(err))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
 	c.Header(contentTypeHeader, string(mediaTypeVersion1))
 	c.Header(varyHeader, contentTypeHeader)
-
-	out, err := json.Marshal(&pve)
-	if err != nil {
-		logger.Log.Error("error encoding adjusted endpoints", zap.Error(err))
-	}
 
 	if _, err := c.Writer.Write(out); err != nil {
 		logger.Log.Error("error writing response", zap.Error(err))

@@ -69,7 +69,7 @@ func (p *Provider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
 }
 
 func dnsRecords2Endpoints(dnsRecords map[string]openwrt.DNSRecord) []*endpoint.Endpoint {
-	var endpoints []*endpoint.Endpoint
+	endpoints := make([]*endpoint.Endpoint, 0, len(dnsRecords))
 	aByDNSName := make(map[string]*endpoint.Endpoint)
 
 	for _, dnsRecord := range dnsRecords {
@@ -102,6 +102,8 @@ func dnsRecords2Endpoints(dnsRecords map[string]openwrt.DNSRecord) []*endpoint.E
 				RecordTTL:  defaultTTL,
 				Targets:    endpoint.Targets{dnsRecord.Value},
 			})
+		default:
+			logger.Log.Warn("skipping unknown DNS record type", zap.String("type", dnsRecord.Type))
 		}
 	}
 
@@ -112,6 +114,11 @@ func endpoints2DNSRecords(endpoints []*endpoint.Endpoint) []openwrt.DNSRecord {
 	var dnsRecords []openwrt.DNSRecord
 
 	for _, ep := range endpoints {
+		if len(ep.Targets) == 0 {
+			logger.Log.Warn("skipping endpoint with no targets", zap.String("dnsName", ep.DNSName), zap.String("type", ep.RecordType))
+			continue
+		}
+
 		switch ep.RecordType {
 		case endpoint.RecordTypeA:
 			for _, target := range ep.Targets {
@@ -134,7 +141,7 @@ func endpoints2DNSRecords(endpoints []*endpoint.Endpoint) []openwrt.DNSRecord {
 				Value: ep.Targets[0],
 			})
 		default:
-			continue
+			logger.Log.Warn("skipping unsupported endpoint record type", zap.String("dnsName", ep.DNSName), zap.String("type", ep.RecordType))
 		}
 	}
 

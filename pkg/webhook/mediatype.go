@@ -29,14 +29,12 @@ func checkAndGetMediaTypeHeaderValue(value string) (string, error) {
 		}
 	}
 
-	supportedMediaTypesString := ""
-	for i, v := range strings.Split(supportedMediaVersions, ",") {
-		sep := ""
-		if i < len(supportedMediaVersions)-1 {
-			sep = ", "
-		}
-		supportedMediaTypesString += string(mediaTypeVersion(v)) + sep
+	versions := strings.Split(supportedMediaVersions, ",")
+	supportedMediaTypes := make([]string, len(versions))
+	for i, v := range versions {
+		supportedMediaTypes[i] = string(mediaTypeVersion(v))
 	}
+	supportedMediaTypesString := strings.Join(supportedMediaTypes, ", ")
 
 	return "", fmt.Errorf("unsupported media type version: '%s'. Supported media types are: '%s'", value, supportedMediaTypesString)
 }

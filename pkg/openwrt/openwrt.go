@@ -39,6 +39,10 @@ func (o *openWRT) GetDNSRecords(ctx context.Context) (map[string]DNSRecord, erro
 		return nil, err
 	}
 
+	if result == "" {
+		return make(map[string]DNSRecord), nil
+	}
+
 	var records map[string]DNSRecord
 	err = json.Unmarshal([]byte(result), &records)
 	if err != nil {
@@ -78,16 +82,16 @@ func (o *openWRT) GetDNSRecords(ctx context.Context) (map[string]DNSRecord, erro
 
 func (o *openWRT) SetDNSRecords(ctx context.Context, records []DNSRecord) error {
 	for _, record := range records {
-		switch {
-		case record.Type == "A":
+		switch record.Type {
+		case "A":
 			if err := o.addA(ctx, record); err != nil {
 				return err
 			}
-		case record.Type == "CNAME":
+		case "CNAME":
 			if err := o.addCName(ctx, record); err != nil {
 				return err
 			}
-		case record.Type == "TXT":
+		case "TXT":
 			if err := o.addTXT(ctx, record); err != nil {
 				return err
 			}
@@ -146,7 +150,7 @@ func (o *openWRT) DeleteDNSRecords(ctx context.Context, deleteRecords []DNSRecor
 }
 
 func (o *openWRT) addA(ctx context.Context, record DNSRecord) error {
-	if record.Type != "a" && record.Type != "A" {
+	if record.Type != "A" {
 		return fmt.Errorf("invalid record type: %s", record.Type)
 	}
 
@@ -175,7 +179,7 @@ func (o *openWRT) addA(ctx context.Context, record DNSRecord) error {
 }
 
 func (o *openWRT) addCName(ctx context.Context, record DNSRecord) error {
-	if record.Type != "cname" && record.Type != "CNAME" {
+	if record.Type != "CNAME" {
 		return fmt.Errorf("invalid record type: %s", record.Type)
 	}
 
@@ -204,7 +208,7 @@ func (o *openWRT) addCName(ctx context.Context, record DNSRecord) error {
 }
 
 func (o *openWRT) addTXT(ctx context.Context, record DNSRecord) error {
-	if record.Type != "txt" && record.Type != "TXT" {
+	if record.Type != "TXT" {
 		return fmt.Errorf("invalid record type: %s", record.Type)
 	}
 

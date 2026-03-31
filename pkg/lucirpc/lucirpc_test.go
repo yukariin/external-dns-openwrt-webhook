@@ -168,10 +168,68 @@ var _ = Describe("Luci RPC", func() {
 			Expect(err).To(Equal(fmt.Errorf("http status code: 500")))
 		})
 
+		It("should fail with null token (wrong credentials)", func() {
+			mux := http.NewServeMux()
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+			u, err := url.Parse(ts.URL)
+			Expect(err).To(BeNil())
+			port, err := strconv.Atoi(u.Port())
+			Expect(err).To(BeNil())
+
+			config := DefaultConfig()
+			config.SSL = false
+			config.Hostname = u.Hostname()
+			config.Port = port
+
+			client := lucirpc{
+				config:     config,
+				httpClient: ts.Client(),
+			}
+
+			mux.HandleFunc(authPath, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":1,"result":null,"error":null}`))
+			})
+
+			err = client.auth(ctx)
+			Expect(err).To(Equal(ErrRpcLoginFail))
+			Expect(client.token).To(Equal(""))
+		})
+
+		It("should fail with empty token", func() {
+			mux := http.NewServeMux()
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+			u, err := url.Parse(ts.URL)
+			Expect(err).To(BeNil())
+			port, err := strconv.Atoi(u.Port())
+			Expect(err).To(BeNil())
+
+			config := DefaultConfig()
+			config.SSL = false
+			config.Hostname = u.Hostname()
+			config.Port = port
+
+			client := lucirpc{
+				config:     config,
+				httpClient: ts.Client(),
+			}
+
+			mux.HandleFunc(authPath, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":1,"result":"","error":null}`))
+			})
+
+			err = client.auth(ctx)
+			Expect(err).To(Equal(ErrRpcLoginFail))
+			Expect(client.token).To(Equal(""))
+		})
+
 	})
 
 	Context("uci", func() {
-		It("should get", func() {
+		It("should re-auth and retry on 401", func() {
 			mux := http.NewServeMux()
 			ts := httptest.NewServer(mux)
 			defer ts.Close()
@@ -223,6 +281,70 @@ var _ = Describe("Luci RPC", func() {
 			Expect(resp).To(Equal(expectedResp))
 			Expect(authCalled).To(BeTrue())
 			Expect(client.token).To(Equal(expectedToken))
+		})
+
+		It("should succeed without re-auth when already authenticated", func() {
+			mux := http.NewServeMux()
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+			u, err := url.Parse(ts.URL)
+			Expect(err).To(BeNil())
+			port, err := strconv.Atoi(u.Port())
+			Expect(err).To(BeNil())
+
+			config := DefaultConfig()
+			config.Hostname = u.Hostname()
+			config.Port = port
+			config.SSL = false
+
+			existingToken := "existing-token"
+			client := lucirpc{
+				config:     config,
+				httpClient: ts.Client(),
+				token:      existingToken,
+			}
+
+			expectedResp := "some-value"
+			mux.HandleFunc(uciPath, func(w http.ResponseWriter, r *http.Request) {
+				Expect(r.RequestURI).To(Equal(uciPath + "?auth=" + existingToken))
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"result":"` + expectedResp + `"}`))
+			})
+
+			resp, err := client.Uci(ctx, "get", []string{"dhcp"})
+			Expect(err).To(BeNil())
+			Expect(resp).To(Equal(expectedResp))
+		})
+
+		It("should return error from RPC error field", func() {
+			mux := http.NewServeMux()
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+			u, err := url.Parse(ts.URL)
+			Expect(err).To(BeNil())
+			port, err := strconv.Atoi(u.Port())
+			Expect(err).To(BeNil())
+
+			config := DefaultConfig()
+			config.Hostname = u.Hostname()
+			config.Port = port
+			config.SSL = false
+
+			client := lucirpc{
+				config:     config,
+				httpClient: ts.Client(),
+				token:      "valid-token",
+			}
+
+			mux.HandleFunc(uciPath, func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":1,"result":null,"error":"Invalid argument"}`))
+			})
+
+			resp, err := client.Uci(ctx, "get", []string{"nonexistent"})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("Invalid argument"))
+			Expect(resp).To(Equal(""))
 		})
 	})
 })
