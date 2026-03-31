@@ -72,22 +72,18 @@ func dnsRecords2Endpoints(dnsRecords map[string]openwrt.DNSRecord) []*endpoint.E
 	var endpoints []*endpoint.Endpoint
 	aByDNSName := make(map[string]*endpoint.Endpoint)
 
-	for uciSection, dnsRecord := range dnsRecords {
+	for _, dnsRecord := range dnsRecords {
+
 		switch dnsRecord.Type {
 		case "A":
 			if ep, ok := aByDNSName[dnsRecord.Name]; ok {
 				ep.Targets = append(ep.Targets, dnsRecord.IP)
-				ep.ProviderSpecific = append(ep.ProviderSpecific,
-					endpoint.ProviderSpecificProperty{Name: openwrt.UCISectionKey, Value: uciSection})
 			} else {
 				ep := &endpoint.Endpoint{
 					DNSName:    dnsRecord.Name,
 					RecordType: endpoint.RecordTypeA,
-					Targets:    endpoint.Targets{dnsRecord.IP},
 					RecordTTL:  defaultTTL,
-					ProviderSpecific: endpoint.ProviderSpecific{
-						{Name: openwrt.UCISectionKey, Value: uciSection},
-					},
+					Targets:    endpoint.Targets{dnsRecord.IP},
 				}
 				aByDNSName[dnsRecord.Name] = ep
 				endpoints = append(endpoints, ep)
@@ -96,21 +92,15 @@ func dnsRecords2Endpoints(dnsRecords map[string]openwrt.DNSRecord) []*endpoint.E
 			endpoints = append(endpoints, &endpoint.Endpoint{
 				DNSName:    dnsRecord.CName,
 				RecordType: endpoint.RecordTypeCNAME,
-				Targets:    endpoint.Targets{dnsRecord.Target},
 				RecordTTL:  defaultTTL,
-				ProviderSpecific: endpoint.ProviderSpecific{
-					{Name: openwrt.UCISectionKey, Value: uciSection},
-				},
+				Targets:    endpoint.Targets{dnsRecord.Target},
 			})
 		case "TXT":
 			endpoints = append(endpoints, &endpoint.Endpoint{
 				DNSName:    dnsRecord.Name,
 				RecordType: endpoint.RecordTypeTXT,
-				Targets:    endpoint.Targets{dnsRecord.Value},
 				RecordTTL:  defaultTTL,
-				ProviderSpecific: endpoint.ProviderSpecific{
-					{Name: openwrt.UCISectionKey, Value: uciSection},
-				},
+				Targets:    endpoint.Targets{dnsRecord.Value},
 			})
 		}
 	}

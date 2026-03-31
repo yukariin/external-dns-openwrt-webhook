@@ -123,23 +123,14 @@ var _ = Describe("Provider Suite", func() {
 				case "multi.example.org":
 					Expect(ep.RecordType).To(Equal(endpoint.RecordTypeA))
 					Expect(ep.Targets).To(ConsistOf("1.1.1.1", "2.2.2.2"))
-					Expect(ep.ProviderSpecific).To(HaveLen(2))
-					uciKeys := []string{}
-					for _, ps := range ep.ProviderSpecific {
-						Expect(ps.Name).To(Equal(openwrt.UCISectionKey))
-						uciKeys = append(uciKeys, ps.Value)
-					}
-					Expect(uciKeys).To(ConsistOf("cfg01", "cfg02"))
 				case "single.example.org":
 					Expect(ep.RecordType).To(Equal(endpoint.RecordTypeA))
 					Expect(ep.Targets).To(ConsistOf("3.3.3.3"))
-					Expect(ep.ProviderSpecific).To(HaveLen(1))
-					Expect(ep.ProviderSpecific[0].Value).To(Equal("cfg03"))
 				}
 			}
 		})
 
-		It("dns records to endpoint with uci section key", func() {
+		It("dns records to endpoint", func() {
 			dnsRecords := map[string]openwrt.DNSRecord{
 				"cfg01a2b3": {
 					Name: "a.foobar.com",
@@ -162,22 +153,16 @@ var _ = Describe("Provider Suite", func() {
 			Expect(len(endpoints)).To(Equal(3))
 
 			for _, ep := range endpoints {
-				Expect(ep.ProviderSpecific).To(HaveLen(1))
-				Expect(ep.ProviderSpecific[0].Name).To(Equal(openwrt.UCISectionKey))
-
 				switch ep.RecordType {
 				case endpoint.RecordTypeA:
 					Expect(ep.DNSName).To(Equal("a.foobar.com"))
 					Expect(ep.Targets[0]).To(Equal("1.1.1.1"))
-					Expect(ep.ProviderSpecific[0].Value).To(Equal("cfg01a2b3"))
 				case endpoint.RecordTypeCNAME:
 					Expect(ep.DNSName).To(Equal("b.foobar.com"))
 					Expect(ep.Targets[0]).To(Equal("c.foobar.com"))
-					Expect(ep.ProviderSpecific[0].Value).To(Equal("cfg04d5e6"))
 				case endpoint.RecordTypeTXT:
 					Expect(ep.DNSName).To(Equal("k8s.a-foobar.com"))
 					Expect(ep.Targets[0]).To(Equal("heritage=external-dns,external-dns/owner=k8s"))
-					Expect(ep.ProviderSpecific[0].Value).To(Equal("cfg07txt0"))
 				}
 			}
 		})
