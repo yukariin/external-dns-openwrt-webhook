@@ -59,6 +59,12 @@ func (o *openWRT) GetDNSRecords(ctx context.Context) (map[string]DNSRecord, erro
 				CName:  record.CName,
 				Target: record.Target,
 			}
+		case "txt":
+			records[key] = DNSRecord{
+				Type:  "TXT",
+				Name:  record.Name,
+				Value: record.Value,
+			}
 		default:
 			// it does not care about other types
 			logger.Log.Debug("ignoring record", zap.String("type", record.Type))
@@ -79,6 +85,10 @@ func (o *openWRT) SetDNSRecords(ctx context.Context, records []DNSRecord) error 
 			}
 		case record.Type == "CNAME":
 			if err := o.addCName(ctx, record); err != nil {
+				return err
+			}
+		case record.Type == "TXT":
+			if err := o.addTXT(ctx, record); err != nil {
 				return err
 			}
 		default:
@@ -193,14 +203,45 @@ func (o *openWRT) addCName(ctx context.Context, record DNSRecord) error {
 	return nil
 }
 
+func (o *openWRT) addTXT(ctx context.Context, record DNSRecord) error {
+	if record.Type != "txt" && record.Type != "TXT" {
+		return fmt.Errorf("invalid record type: %s", record.Type)
+	}
+
+	if record.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+
+	if record.Value == "" {
+		return fmt.Errorf("value is required")
+	}
+
+	cfg, err := o.lucirpc.Uci(ctx, "add", []string{"dhcp", "txt"})
+	if err != nil {
+		return err
+	}
+
+	if _, err := o.lucirpc.Uci(ctx, "set", []string{"dhcp", cfg, "name", record.Name}); err != nil {
+		return err
+	}
+
+	if _, err := o.lucirpc.Uci(ctx, "set", []string{"dhcp", cfg, "value", record.Value}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // recordMatches checks whether a current UCI record matches a desired record
-// by comparing type, name, and value (IP for A records, target for CNAME).
+// by comparing type, name, and value (IP for A records, target for CNAME, value for TXT).
 func recordMatches(current DNSRecord, desired DNSRecord) bool {
 	switch desired.Type {
 	case "A":
 		return current.Type == "A" && current.Name == desired.Name && current.IP == desired.IP
 	case "CNAME":
 		return current.Type == "CNAME" && current.CName == desired.CName && current.Target == desired.Target
+	case "TXT":
+		return current.Type == "TXT" && current.Name == desired.Name && current.Value == desired.Value
 	}
 	return false
 }

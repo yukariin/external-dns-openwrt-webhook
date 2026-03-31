@@ -64,6 +64,11 @@ var _ = Describe("OpenWRT", func() {
 				"z": {
 					Type: "whatever",
 				},
+				"t": {
+					Type:  "txt",
+					Name:  "k8s.example",
+					Value: "heritage=external-dns",
+				},
 			})
 			Expect(err).To(BeNil())
 			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return(string(expectedJson), nil)
@@ -83,6 +88,11 @@ var _ = Describe("OpenWRT", func() {
 					Type:   "CNAME",
 					CName:  "foobar",
 					Target: "bar.foo.com",
+				},
+				"t": {
+					Type:  "TXT",
+					Name:  "k8s.example",
+					Value: "heritage=external-dns",
 				},
 			}))
 		})
@@ -181,6 +191,53 @@ var _ = Describe("OpenWRT", func() {
 			})
 			Expect(err).ToNot(BeNil())
 			Expect(err.Error()).To(Equal("target is required"))
+		})
+
+		It("set TXT record", func() {
+			cfg := "foobar"
+			name := "k8s.test"
+			value := "heritage=external-dns,external-dns/owner=k8s"
+
+			mockLuciRPC.EXPECT().Uci(ctx, "add", []string{"dhcp", "txt"}).Return(cfg, nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", cfg, "name", name}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "set", []string{"dhcp", cfg, "value", value}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "commit", []string{"dhcp"}).Return("", nil)
+
+			o := openWRT{
+				lucirpc: mockLuciRPC,
+			}
+			err := o.SetDNSRecords(ctx, []DNSRecord{
+				{
+					Type:  "TXT",
+					Name:  name,
+					Value: value,
+				},
+			})
+			Expect(err).To(BeNil())
+		})
+
+		It("TXT without name", func() {
+			o := openWRT{}
+			err := o.SetDNSRecords(ctx, []DNSRecord{
+				{
+					Type:  "TXT",
+					Value: "heritage=external-dns",
+				},
+			})
+			Expect(err).ToNot(BeNil())
+			Expect(err.Error()).To(Equal("name is required"))
+		})
+
+		It("TXT without value", func() {
+			o := openWRT{}
+			err := o.SetDNSRecords(ctx, []DNSRecord{
+				{
+					Type: "TXT",
+					Name: "k8s.test",
+				},
+			})
+			Expect(err).ToNot(BeNil())
+			Expect(err.Error()).To(Equal("value is required"))
 		})
 	})
 
@@ -372,6 +429,12 @@ var _ = Describe("OpenWRT", func() {
 
 		It("does not match across types", func() {
 			Expect(recordMatches(DNSRecord{Type: "A", Name: "foo.com", IP: "1.1.1.1"}, DNSRecord{Type: "CNAME", CName: "foo.com", Target: "1.1.1.1"})).To(BeFalse())
+		})
+
+		It("matches TXT record by type name and value", func() {
+			Expect(recordMatches(DNSRecord{Type: "TXT", Name: "k8s.foo", Value: "heritage=external-dns"}, DNSRecord{Type: "TXT", Name: "k8s.foo", Value: "heritage=external-dns"})).To(BeTrue())
+			Expect(recordMatches(DNSRecord{Type: "TXT", Name: "k8s.foo", Value: "heritage=external-dns"}, DNSRecord{Type: "TXT", Name: "k8s.foo", Value: "other"})).To(BeFalse())
+			Expect(recordMatches(DNSRecord{Type: "TXT", Name: "k8s.foo", Value: "heritage=external-dns"}, DNSRecord{Type: "TXT", Name: "k8s.bar", Value: "heritage=external-dns"})).To(BeFalse())
 		})
 	})
 })

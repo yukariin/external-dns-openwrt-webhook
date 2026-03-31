@@ -14,4 +14,5 @@ type DNSRecord struct {
 	Name   string `json:"name,omitempty"`
 	CName  string `json:"cname,omitempty"`
 	Target string `json:"target,omitempty"`
+	Value  string `json:"value,omitempty"`
 }
