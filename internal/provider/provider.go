@@ -70,32 +70,49 @@ func (p *Provider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
 
 func dnsRecords2Endpoints(dnsRecords map[string]openwrt.DNSRecord) []*endpoint.Endpoint {
 	var endpoints []*endpoint.Endpoint
+	aByDNSName := make(map[string]*endpoint.Endpoint)
 
 	for uciSection, dnsRecord := range dnsRecords {
-		var ep endpoint.Endpoint
-
 		switch dnsRecord.Type {
 		case "A":
-			ep.RecordType = endpoint.RecordTypeA
-			ep.DNSName = dnsRecord.Name
-			ep.Targets = endpoint.Targets{dnsRecord.IP}
+			if ep, ok := aByDNSName[dnsRecord.Name]; ok {
+				ep.Targets = append(ep.Targets, dnsRecord.IP)
+				ep.ProviderSpecific = append(ep.ProviderSpecific,
+					endpoint.ProviderSpecificProperty{Name: openwrt.UCISectionKey, Value: uciSection})
+			} else {
+				ep := &endpoint.Endpoint{
+					DNSName:    dnsRecord.Name,
+					RecordType: endpoint.RecordTypeA,
+					Targets:    endpoint.Targets{dnsRecord.IP},
+					RecordTTL:  defaultTTL,
+					ProviderSpecific: endpoint.ProviderSpecific{
+						{Name: openwrt.UCISectionKey, Value: uciSection},
+					},
+				}
+				aByDNSName[dnsRecord.Name] = ep
+				endpoints = append(endpoints, ep)
+			}
 		case "CNAME":
-			ep.RecordType = endpoint.RecordTypeCNAME
-			ep.DNSName = dnsRecord.CName
-			ep.Targets = endpoint.Targets{dnsRecord.Target}
+			endpoints = append(endpoints, &endpoint.Endpoint{
+				DNSName:    dnsRecord.CName,
+				RecordType: endpoint.RecordTypeCNAME,
+				Targets:    endpoint.Targets{dnsRecord.Target},
+				RecordTTL:  defaultTTL,
+				ProviderSpecific: endpoint.ProviderSpecific{
+					{Name: openwrt.UCISectionKey, Value: uciSection},
+				},
+			})
 		case "TXT":
-			ep.RecordType = endpoint.RecordTypeTXT
-			ep.DNSName = dnsRecord.Name
-			ep.Targets = endpoint.Targets{dnsRecord.Value}
-		default:
-			continue
+			endpoints = append(endpoints, &endpoint.Endpoint{
+				DNSName:    dnsRecord.Name,
+				RecordType: endpoint.RecordTypeTXT,
+				Targets:    endpoint.Targets{dnsRecord.Value},
+				RecordTTL:  defaultTTL,
+				ProviderSpecific: endpoint.ProviderSpecific{
+					{Name: openwrt.UCISectionKey, Value: uciSection},
+				},
+			})
 		}
-
-		ep.RecordTTL = defaultTTL
-		ep.ProviderSpecific = endpoint.ProviderSpecific{
-			{Name: openwrt.UCISectionKey, Value: uciSection},
-		}
-		endpoints = append(endpoints, &ep)
 	}
 
 	return endpoints

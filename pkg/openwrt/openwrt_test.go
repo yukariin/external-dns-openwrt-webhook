@@ -413,6 +413,86 @@ var _ = Describe("OpenWRT", func() {
 			Expect(err).ToNot(BeNil())
 			Expect(err.Error()).To(ContainSubstring("records not found for deletion"))
 		})
+
+		It("delete TXT record", func() {
+			cfg := "t"
+			name := "k8s.test.example.org"
+			value := "heritage=external-dns,external-dns/owner=k8s"
+
+			expectedCurrentDNSRecords := map[string]DNSRecord{
+				"x": {
+					Type: "domain",
+					Name: "happy.com",
+					IP:   "1.1.1.1",
+				},
+				cfg: {
+					Type:  "txt",
+					Name:  name,
+					Value: value,
+				},
+			}
+
+			expectedCurrentJson, err := json.Marshal(expectedCurrentDNSRecords)
+			Expect(err).To(BeNil())
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return(string(expectedCurrentJson), nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "delete", []string{"dhcp", cfg}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "commit", []string{"dhcp"}).Return("", nil)
+
+			o := openWRT{
+				lucirpc: mockLuciRPC,
+			}
+			err = o.DeleteDNSRecords(ctx, []DNSRecord{
+				{
+					Type:  "TXT",
+					Name:  name,
+					Value: value,
+				},
+			})
+			Expect(err).To(BeNil())
+		})
+
+		It("delete both A records and TXT together", func() {
+			cfg1 := "x"
+			cfg2 := "w"
+			cfgTxt := "t"
+			name := "test.example.org"
+
+			expectedCurrentDNSRecords := map[string]DNSRecord{
+				cfg1: {
+					Type: "domain",
+					Name: name,
+					IP:   "1.1.1.1",
+				},
+				cfg2: {
+					Type: "domain",
+					Name: name,
+					IP:   "2.2.2.2",
+				},
+				cfgTxt: {
+					Type:  "txt",
+					Name:  "k8s." + name,
+					Value: "heritage=external-dns,external-dns/owner=k8s",
+				},
+			}
+
+			expectedCurrentJson, err := json.Marshal(expectedCurrentDNSRecords)
+			Expect(err).To(BeNil())
+			mockLuciRPC.EXPECT().Uci(ctx, "get_all", []string{"dhcp"}).Return(string(expectedCurrentJson), nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "delete", []string{"dhcp", cfg1}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "delete", []string{"dhcp", cfg2}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "delete", []string{"dhcp", cfgTxt}).Return("", nil)
+			mockLuciRPC.EXPECT().Uci(ctx, "commit", []string{"dhcp"}).Return("", nil)
+
+			o := openWRT{
+				lucirpc: mockLuciRPC,
+			}
+			err = o.DeleteDNSRecords(ctx, []DNSRecord{
+				{Type: "A", Name: name, IP: "1.1.1.1"},
+				{Type: "A", Name: name, IP: "2.2.2.2"},
+				{Type: "TXT", Name: "k8s." + name, Value: "heritage=external-dns,external-dns/owner=k8s"},
+			})
+			Expect(err).To(BeNil())
+		})
 	})
 
 	Context("recordMatches", func() {
